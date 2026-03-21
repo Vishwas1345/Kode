@@ -3,8 +3,9 @@ import { prisma } from "@/server/db";
 import { RateLimiterPrisma } from "rate-limiter-flexible";
 import { clerkClient } from "@clerk/nextjs/server";
 import { ADMIN_CREDITS, PLAN_CREDITS, PLANS, USAGE_DURATION } from "@/shared/constants";
-import { GEMINI_SYSTEM_PROMPT, GEMINI_RESPONSE_SCHEMA, GEMINI_MODEL, GEMINI_BASE_URL } from "./prompt";
+import { GEMINI_SYSTEM_PROMPT, GEMINI_REPAIR_PROMPT, GEMINI_RESPONSE_SCHEMA, GEMINI_MODEL, GEMINI_BASE_URL } from "./prompt";
 import { parseAIJsonOutput } from "@/server/lib/json-repair";
+import { fixGeneratedFiles, detectIssues } from "@/server/lib/sandbox/code-fixer";
 
 function getGeminiUrl(): string {
   return `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`;
@@ -39,6 +40,78 @@ const ERROR_APP_FILES: Record<string, string> = {
   "app/layout.tsx": `export default function RootLayout({ children }: { children: React.ReactNode }) {\n  return (\n    <html>\n      <body>{children}</body>\n    </html>\n  );\n}`,
 };
 
+/**
+ * Call Gemini to repair broken code using build errors as context.
+ */
+async function repairWithGemini(
+  files: Record<string, string>,
+  issues: string[],
+  logger: { info: (...args: any[]) => void; warn: (...args: any[]) => void; error: (...args: any[]) => void }
+): Promise<Record<string, string>> {
+  const filesSummary = Object.entries(files)
+    .map(([path, content]) => `--- ${path} ---\n${content}`)
+    .join("\n\n");
+
+  const repairPrompt = GEMINI_REPAIR_PROMPT.replace("{BUILD_ERRORS}", issues.join("\n"));
+
+  try {
+    const response = await fetch(getGeminiUrl(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text: repairPrompt }],
+        },
+        contents: [
+          { parts: [{ text: `Here are the project files to fix:\n\n${filesSummary}` }] },
+        ],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 65536,
+          responseMimeType: "application/json",
+          responseSchema: GEMINI_RESPONSE_SCHEMA,
+        },
+      }),
+    });
+
+    const data = await response.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+    if (!text) {
+      logger.warn("Gemini repair returned empty response, using original files");
+      return files;
+    }
+
+    const { data: fileArray } = parseAIJsonOutput(text);
+    const repairedFiles: Record<string, string> = {};
+
+    if (Array.isArray(fileArray)) {
+      fileArray.forEach((f: { path?: string; content?: string }) => {
+        if (f.path && f.content) {
+          repairedFiles[f.path] = f.content;
+        }
+      });
+    }
+
+    // Only use repaired files if they have the basics
+    const hasPackageJson = !!repairedFiles["package.json"];
+    const hasPage = Object.keys(repairedFiles).some(
+      (k) => k.endsWith("page.tsx") || k.endsWith("page.js")
+    );
+
+    if (Object.keys(repairedFiles).length > 0 && hasPackageJson && hasPage) {
+      logger.info("Gemini repair succeeded", { fileCount: Object.keys(repairedFiles).length });
+      return repairedFiles;
+    }
+
+    logger.warn("Gemini repair output missing required files, using original");
+    return files;
+  } catch (err) {
+    logger.error("Gemini repair call failed", { error: err });
+    return files;
+  }
+}
+
 export const codeAgentFunction = inngest.createFunction(
   { id: "code-agent" },
   { event: "code-agent/run" },
@@ -57,9 +130,9 @@ export const codeAgentFunction = inngest.createFunction(
       try {
         const clerk = await clerkClient();
         const clerkUser = await clerk.users.getUser(project.userId);
-        const adminEmail = process.env.ADMIN_EMAIL;
-        const isAdmin = adminEmail && clerkUser?.emailAddresses?.some(
-          (email) => email.emailAddress === adminEmail
+        const adminEmails = process.env.ADMIN_EMAILS?.split(",").map((e) => e.trim()) ?? [];
+        const isAdmin = adminEmails.length > 0 && clerkUser?.emailAddresses?.some(
+          (email) => adminEmails.includes(email.emailAddress)
         );
         if (isAdmin) {
           pointsAllowed = ADMIN_CREDITS;
@@ -106,7 +179,7 @@ export const codeAgentFunction = inngest.createFunction(
             ],
             generationConfig: {
               temperature: 0.1,
-              maxOutputTokens: 8192,
+              maxOutputTokens: 65536,
               responseMimeType: "application/json",
               responseSchema: GEMINI_RESPONSE_SCHEMA,
             },
@@ -171,6 +244,23 @@ export const codeAgentFunction = inngest.createFunction(
           "app/page.tsx": `export default function App() {\n  return (\n    <div className="p-8 text-red-500 font-mono text-sm">\n      ${errorMessage}\n    </div>\n  );\n}`,
         };
       } else {
+        // === STEP 1: Apply programmatic fixes ===
+        logger.info("Applying programmatic code fixes...");
+        parsedFiles = fixGeneratedFiles(parsedFiles);
+
+        // === STEP 2: Detect remaining structural issues ===
+        const issues = detectIssues(parsedFiles);
+        if (issues.length > 0) {
+          logger.warn("Structural issues detected after programmatic fix", { issues });
+
+          // === STEP 3: Gemini repair pass for unresolved issues ===
+          logger.info("Running Gemini repair pass...");
+          parsedFiles = await repairWithGemini(parsedFiles, issues, logger);
+
+          // Re-apply programmatic fixes on repaired output
+          parsedFiles = fixGeneratedFiles(parsedFiles);
+        }
+
         // Deduct 1 credit ONLY after successful generation
         try {
           await rateLimiter.consume(project.userId, 1);

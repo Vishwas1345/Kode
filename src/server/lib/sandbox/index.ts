@@ -1,6 +1,7 @@
 import { Sandbox } from "@e2b/code-interpreter";
 import { prisma } from "@/server/db";
 import { ensureDefaultConfigs, writeFilesToSandbox } from "./file-writer";
+import { fixGeneratedFiles } from "./code-fixer";
 
 const MAX_ATTEMPTS = 3;
 const SANDBOX_TIMEOUT_MS = 3600000; // 1 hour
@@ -54,7 +55,12 @@ async function startServer(
         timeoutMs: BUILD_TIMEOUT_MS,
       });
       console.log(`[Attempt ${attempt}] Build output:`, buildResult.stdout);
-      buildSuccess = true;
+      if (buildResult.exitCode === 0) {
+        buildSuccess = true;
+      } else {
+        console.error(`[Attempt ${attempt}] Build exited with code ${buildResult.exitCode}, falling back to dev...`);
+        if (buildResult.stderr) console.error(`Build stderr:`, buildResult.stderr);
+      }
     } catch (err) {
       console.error(
         `[Attempt ${attempt}] Build failed, trying dev fallback...`,
@@ -116,6 +122,8 @@ export async function createSandbox(
   }
 
   let files = fragment.files as Record<string, string>;
+  // Apply programmatic fixes before sandbox creation
+  files = fixGeneratedFiles(files);
   const isNextJs = detectIsNextJs(files);
   files = ensureDefaultConfigs(files);
 

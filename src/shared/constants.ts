@@ -21,7 +21,7 @@ export const PLAN_PURCHASE_CREDITS: Record<string, number> = {
 };
 
 // Admin override
-export const ADMIN_CREDITS = 999999999;
+export const ADMIN_CREDITS = 100000;
 
 // Rate limiter duration (30 days in seconds)
 export const USAGE_DURATION = 30 * 24 * 60 * 60;

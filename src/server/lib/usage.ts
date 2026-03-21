@@ -16,9 +16,9 @@ export async function getUsageTracker() {
 
   let pointsAllowed = PLAN_CREDITS[PLANS.FREE];
 
-  const adminEmail = process.env.ADMIN_EMAIL;
-  const isAdmin = adminEmail && user?.emailAddresses?.some(
-    (email) => email.emailAddress === adminEmail
+  const adminEmails = process.env.ADMIN_EMAILS?.split(",").map((e) => e.trim()) ?? [];
+  const isAdmin = adminEmails.length > 0 && user?.emailAddresses?.some(
+    (email) => adminEmails.includes(email.emailAddress)
   );
 
   if (isAdmin) {

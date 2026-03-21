@@ -9,7 +9,7 @@ const envSchema = z.object({
   CLERK_SECRET_KEY: z.string().min(1, "CLERK_SECRET_KEY is required"),
   NEXT_PUBLIC_RAZORPAY_KEY_ID: z.string().min(1, "NEXT_PUBLIC_RAZORPAY_KEY_ID is required"),
   RAZORPAY_KEY_SECRET: z.string().min(1, "RAZORPAY_KEY_SECRET is required"),
-  ADMIN_EMAIL: z.string().email("ADMIN_EMAIL must be a valid email").min(1, "ADMIN_EMAIL is required"),
+  ADMIN_EMAILS: z.string().min(1, "ADMIN_EMAILS is required"),
 });
 
 export const env = envSchema.parse(process.env);

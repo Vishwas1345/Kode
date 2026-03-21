@@ -26,7 +26,7 @@ interface Props {
 };
 
 export const ProjectView = ({ projectId }: Props) => {
-  const { has } = useAuth();
+  const { isLoaded, has } = useAuth();
   const hasProAccess = has?.({ plan: "pro" });
 
   const [activeFragment, setActiveFragment] = useState<Fragment | null>(null);
@@ -76,7 +76,7 @@ export const ProjectView = ({ projectId }: Props) => {
                 </TabsTrigger>
               </TabsList>
               <div className="ml-auto flex items-center gap-x-2">
-                {!hasProAccess && (
+                {isLoaded && !hasProAccess && (
                   <Button asChild size="sm" className="bg-[#111] hover:bg-[#222] text-[#00FF88] border border-[#1F1F1F] neon-glow-hover transition-all">
                     <Link href="/pricing">
                       <CrownIcon className="w-4 h-4 mr-1.5" /> Upgrade
@@ -86,7 +86,7 @@ export const ProjectView = ({ projectId }: Props) => {
                 <UserControl />
               </div>
             </div>
-            <TabsContent value="preview">
+            <TabsContent value="preview" className="min-h-0 overflow-hidden">
               {!!activeFragment && <FragmentWeb data={activeFragment} projectId={projectId} />}
             </TabsContent>
             <TabsContent value="code" className="min-h-0">
