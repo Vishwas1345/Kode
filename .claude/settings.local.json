@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -r console. --include=*.ts --include=*.tsx --include=*.js src/)",
+      "Bash(grep -rn \"hardcoded\\\\|TODO\\\\|FIXME\\\\|XXX\\\\|HACK\" src/ --include=*.ts --include=*.tsx)"
+    ]
+  }
+}
