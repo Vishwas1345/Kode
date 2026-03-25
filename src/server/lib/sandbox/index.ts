@@ -48,37 +48,10 @@ async function startServer(
   attempt: number
 ): Promise<void> {
   if (isNextJs) {
-    console.log(`[Attempt ${attempt}] Building Next.js app...`);
-    let buildSuccess = false;
-    try {
-      const buildResult = await sandbox.commands.run("npx next build", {
-        timeoutMs: BUILD_TIMEOUT_MS,
-      });
-      console.log(`[Attempt ${attempt}] Build output:`, buildResult.stdout);
-      if (buildResult.exitCode === 0) {
-        buildSuccess = true;
-      } else {
-        console.error(`[Attempt ${attempt}] Build exited with code ${buildResult.exitCode}, falling back to dev...`);
-        if (buildResult.stderr) console.error(`Build stderr:`, buildResult.stderr);
-      }
-    } catch (err) {
-      console.error(
-        `[Attempt ${attempt}] Build failed, trying dev fallback...`,
-        err
-      );
-    }
-
-    if (buildSuccess) {
-      console.log(`[Attempt ${attempt}] Starting Next.js server...`);
-      await sandbox.commands.run("npx next start -p 3000 -H 0.0.0.0", {
-        background: true,
-      });
-    } else {
-      console.log(`[Attempt ${attempt}] Starting Next.js Dev fallback server...`);
-      await sandbox.commands.run("npx next dev -p 3000 -H 0.0.0.0", {
-        background: true,
-      });
-    }
+    console.log(`[Attempt ${attempt}] Starting Next.js Dev server...`);
+    await sandbox.commands.run("npx next dev -p 3000 -H 0.0.0.0", {
+      background: true,
+    });
   } else {
     console.log(`[Attempt ${attempt}] Starting React/Vite dev server...`);
     await sandbox.commands.run("npm run dev", { background: true });
